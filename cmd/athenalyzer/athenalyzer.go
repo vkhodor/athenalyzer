@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/athena"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -29,6 +30,7 @@ const awsAthenaIDsQuery = `
 			eventtime > '%s'
 	AND
 			eventtime < '%s'
+	LIMIT 10
 `
 
 /*
@@ -67,8 +69,50 @@ func main() {
 	}
 
 	ids := QueryIDs(athenaRows)
-	for _, id := range ids {
-		fmt.Println(*id)
+	var batch []*string
+	for i, id := range ids {
+		batch = append(batch, id)
+		fmt.Printf("%v %s\n", i, *id)
+		if (i%50 == 0 && i != 0) || i == len(ids)-1 {
+			// TODO: send batch and cleanup batch
+			qei := athena.BatchGetQueryExecutionInput{QueryExecutionIds: batch}
+			output, err := athenaClient.BatchGetQueryExecution(&qei)
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(2)
+			}
+
+			fmt.Print("QueryExecutionId")
+			fmt.Print(",")
+			fmt.Print("Database")
+			fmt.Print(",")
+			fmt.Print("SubmissionDateTime")
+			fmt.Print(",")
+			fmt.Print("EngineExecutionTimeInMillis")
+			fmt.Print(",")
+			fmt.Print("DataScannedInBytes")
+			fmt.Print(",")
+			fmt.Print("Query")
+			fmt.Println("")
+
+			fmt.Println("")
+			for _, o := range output.QueryExecutions {
+				fmt.Printf("\"%v\"", *o.QueryExecutionId)
+				fmt.Print(",")
+				fmt.Printf("\"%v\"", *o.QueryExecutionContext.Database)
+				fmt.Print(",")
+				fmt.Printf("\"%v\"", *o.Status.SubmissionDateTime)
+				fmt.Print(",")
+				fmt.Printf("\"%v\"", *o.Statistics.EngineExecutionTimeInMillis)
+				fmt.Print(",")
+				fmt.Printf("\"%v\"", *o.Statistics.DataScannedInBytes)
+				fmt.Print(",")
+				fmt.Printf("\"%v\"", strings.ReplaceAll(*o.Query, "\"", "'"))
+				fmt.Println("")
+
+			}
+		}
+
 	}
 
 }
