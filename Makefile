@@ -6,7 +6,6 @@ GOARCH?=amd64
 VERSION=`git describe --tags`
 BUILD_TIME=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS=-ldflags="-X main.version=$(VERSION)/$(BUILD_TIME)"
-
 APP="athenalyzer"
 
 
@@ -17,15 +16,12 @@ fmt:
 # Compile application
 build: fmt app
 
-app: 
-	@go build $(LDFLAGS) ./cmd/$(APP)
+app:
+	@echo "+ $@"
+	@set -e; export GOFLAGS="-mod=vendor"; go build $(LDFLAGS) ./cmd/$(APP)
 
-Gopkg.toml:
-	@$(GOPATH)/bin/dep init
 
 clean:
-	@rm -vrf vendor
-	@rm -vf Gopkg.*
 	@rm -vf $(APP)
 
 install: $(APP)
@@ -35,7 +31,4 @@ install: $(APP)
 uninstall:
 	@rm -vf $(HOME)/bin/$(APP)
 
-rebuild: Gopkg.toml
-	@rm -vf ./$(APP)
-	@go build $(LDFLAGS) ./cmd/$(APP)
-
+rebuild: clean build
