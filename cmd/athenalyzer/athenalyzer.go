@@ -30,24 +30,12 @@ const awsAthenaIDsQuery = `
 			eventtime > '%s'
 	AND
 			eventtime < '%s'
-	LIMIT 10
 `
 
-/*
-const awsAthenaIDsQuery = `
-	SELECT DISTINCT
-			requestparameters
-	FROM
-			cloudtrail_logs_personartb_trails
-	WHERE
-			eventname='GetQueryExecution'
-	LIMIT 10
-`
-*/
-const DurationSeconds = 2
+const awsAthenaBatchSize = 49
+const durationSeconds = 2
 
 func main() {
-
 	argVersion := flag.Bool("version", false, "show version")
 	argFromTime := flag.String("from-time", "", "from time (format: 0000-00-00T00:00:00Z)")
 	argToTime := flag.String("to-time", "", "from time (format: 0000-00-00T00:00:00Z)")
@@ -55,47 +43,46 @@ func main() {
 	flag.Parse()
 
 	if *argVersion {
-		fmt.Println("AthenAlyzer " + version)
+		fmt.Println("Athenalyzer " + version)
 		os.Exit(0)
 	}
 
-	athenaClient := AthenaClient(argAWSRegion)
+	athenaClient := athenaClient(argAWSRegion)
 	query := fmt.Sprintf(awsAthenaIDsQuery, *argFromTime, *argToTime)
 	//query := awsAthenaIDsQuery
-	athenaRows, err := AthenaQuery(athenaClient, awsAthenaDBName, query, awsAthenaResultBucket)
+	athenaRows, err := athenaQuery(athenaClient, awsAthenaDBName, query, awsAthenaResultBucket)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
 
-	ids := QueryIDs(athenaRows)
+	ids := queryIDs(athenaRows)
+	//fmt.Printf(" ###len(ids) = %v\n", len(ids))
+	fmt.Print("queryExecutionID")
+	fmt.Print(",")
+	fmt.Print("Database")
+	fmt.Print(",")
+	fmt.Print("SubmissionDateTime")
+	fmt.Print(",")
+	fmt.Print("EngineExecutionTimeInMillis")
+	fmt.Print(",")
+	fmt.Print("DataScannedInBytes")
+	fmt.Print(",")
+	fmt.Print("Query")
+	fmt.Println("")
+
 	var batch []*string
 	for i, id := range ids {
 		batch = append(batch, id)
-		fmt.Printf("%v %s\n", i, *id)
-		if (i%50 == 0 && i != 0) || i == len(ids)-1 {
-			// TODO: send batch and cleanup batch
+		if (i%awsAthenaBatchSize == 0 && i != 0) || i == len(ids)-1 {
 			qei := athena.BatchGetQueryExecutionInput{QueryExecutionIds: batch}
 			output, err := athenaClient.BatchGetQueryExecution(&qei)
+			//fmt.Printf("### len(batch)=%v len(output)=%v\n", len(batch), len(output.QueryExecutions))
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(2)
 			}
 
-			fmt.Print("QueryExecutionId")
-			fmt.Print(",")
-			fmt.Print("Database")
-			fmt.Print(",")
-			fmt.Print("SubmissionDateTime")
-			fmt.Print(",")
-			fmt.Print("EngineExecutionTimeInMillis")
-			fmt.Print(",")
-			fmt.Print("DataScannedInBytes")
-			fmt.Print(",")
-			fmt.Print("Query")
-			fmt.Println("")
-
-			fmt.Println("")
 			for _, o := range output.QueryExecutions {
 				fmt.Printf("\"%v\"", *o.QueryExecutionId)
 				fmt.Print(",")
@@ -107,24 +94,25 @@ func main() {
 				fmt.Print(",")
 				fmt.Printf("\"%v\"", *o.Statistics.DataScannedInBytes)
 				fmt.Print(",")
-				fmt.Printf("\"%v\"", strings.ReplaceAll(*o.Query, "\"", "'"))
+				formatedQuery := strings.ReplaceAll(*o.Query, "\"", "'")
+				formatedQuery = strings.ReplaceAll(formatedQuery, "\n", " ")
+				formatedQuery = strings.ReplaceAll(formatedQuery, "\t", " ")
+				fmt.Printf("\"%v\"", formatedQuery)
 				fmt.Println("")
-
 			}
+			batch = nil
 		}
-
 	}
-
 }
 
-func AthenaClient(awsRegion *string) *athena.Athena {
+func athenaClient(awsRegion *string) *athena.Athena {
 	awsCfg := &aws.Config{Region: awsRegion}
 	awsSession := session.Must(session.NewSession(awsCfg))
 
 	return athena.New(awsSession)
 }
 
-func AthenaQuery(a *athena.Athena, db string, query string, bucketResult string) ([]*athena.Row, error) {
+func athenaQuery(a *athena.Athena, db string, query string, bucketResult string) ([]*athena.Row, error) {
 	var s athena.StartQueryExecutionInput
 	s.SetQueryString(query)
 
@@ -145,7 +133,7 @@ func AthenaQuery(a *athena.Athena, db string, query string, bucketResult string)
 	qri.SetQueryExecutionId(*result.QueryExecutionId)
 
 	var qrop *athena.GetQueryExecutionOutput
-	duration := time.Duration(DurationSeconds) * time.Second // Pause for 2 seconds
+	duration := time.Duration(durationSeconds) * time.Second // Pause for 2 seconds
 
 	for {
 		qrop, err = a.GetQueryExecution(&qri)
@@ -184,17 +172,17 @@ func AthenaQuery(a *athena.Athena, db string, query string, bucketResult string)
 	}
 }
 
-type QueryExecutionId struct {
-	QueryExecutionId string
+type queryExecutionID struct {
+	QueryExecutionID string
 }
 
-func QueryIDs(rows []*athena.Row) []*string {
+func queryIDs(rows []*athena.Row) []*string {
 	var ids []*string
 
 	for _, row := range rows {
-		var id QueryExecutionId
+		var id queryExecutionID
 		json.Unmarshal([]byte(*row.Data[0].VarCharValue), &id)
-		ids = append(ids, &id.QueryExecutionId)
+		ids = append(ids, &id.QueryExecutionID)
 	}
 
 	return ids
