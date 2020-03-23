@@ -8,6 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/athena"
+	"github.com/dustin/go-humanize"
 	"os"
 	"strings"
 	"time"
@@ -66,6 +67,10 @@ func main() {
 	fmt.Print(",")
 	fmt.Print("EngineExecutionTimeInMillis")
 	fmt.Print(",")
+	fmt.Print("OutputLocation (bucket)")
+	fmt.Print(",")
+	fmt.Print("Scanned(humanized)")
+	fmt.Print(",")
 	fmt.Print("DataScannedInBytes")
 	fmt.Print(",")
 	fmt.Print("Query")
@@ -91,6 +96,10 @@ func main() {
 				fmt.Printf("\"%v\"", *o.Status.SubmissionDateTime)
 				fmt.Print(",")
 				fmt.Printf("\"%v\"", *o.Statistics.EngineExecutionTimeInMillis)
+				fmt.Print(",")
+				fmt.Printf("\"%v\"", strings.Split(*o.ResultConfiguration.OutputLocation, "/")[2])
+				fmt.Print(",")
+				fmt.Printf("\"%v\"", humanize.Bytes(uint64(*o.Statistics.DataScannedInBytes)))
 				fmt.Print(",")
 				fmt.Printf("\"%v\"", *o.Statistics.DataScannedInBytes)
 				fmt.Print(",")

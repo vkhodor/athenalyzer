@@ -18,20 +18,28 @@ fmt:
 	@echo "+ $@"
 	@gofmt -w ./
 
+tidy:
+	@echo "+ $@"
+	@set -e; export GOLANGFLAGS="-mod=vendor"; \
+	go mod tidy
+
+.PHONY: vendor
+vendor:
+	@echo "+ $@"
+	@go mod vendor
+
 # Compile application
-build: fmt lint linux-amd64 windows-amd64
+build: tidy vendor fmt lint linux-amd64 windows-amd64
 
 linux-amd64:
 	@echo "+ $@"
 	@set -e; export GOOS=linux; export GOARCH=amd64; \
-	export GOLANGFLAGS="-mod=vendor"; \
-	go build $(LDFLAGS) -o ./$(APP)-$@ ./cmd/$(APP)
+	go build $(LDFLAGS) -mod vendor -o ./$(APP)-$@ ./cmd/$(APP)
 
 windows-amd64:
 	@echo "+ $@"
 	@set -e; export GOOS=windows; export GOARCH=amd64; \
-	export GOLANGFLAGS="-mod=vendor"; \
-	go build $(LDFLAGS) -o ./$(APP)-$@ ./cmd/$(APP)
+	go build $(LDFLAGS) -mod vendor -o ./$(APP)-$@ ./cmd/$(APP)
 
 clean:
 	@rm -vf ./$(APP)-* ./$(APP)
