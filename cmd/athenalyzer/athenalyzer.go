@@ -82,7 +82,7 @@ func main() {
 		if (i%awsAthenaBatchSize == 0 && i != 0) || i == len(ids)-1 {
 			qei := athena.BatchGetQueryExecutionInput{QueryExecutionIds: batch}
 			output, err := athenaClient.BatchGetQueryExecution(&qei)
-			//fmt.Printf("### len(batch)=%v len(output)=%v\n", len(batch), len(output.QueryExecutions))
+			//			fmt.Printf("### len(batch)=%v len(output)=%v\n", len(batch), len(output.QueryExecutions))
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(2)
@@ -95,13 +95,21 @@ func main() {
 				fmt.Print(",")
 				fmt.Printf("\"%v\"", *o.Status.SubmissionDateTime)
 				fmt.Print(",")
-				fmt.Printf("\"%v\"", *o.Statistics.EngineExecutionTimeInMillis)
+				et := int64(-1)
+				if o.Statistics.EngineExecutionTimeInMillis != nil {
+					et = *o.Statistics.EngineExecutionTimeInMillis
+				}
+				fmt.Printf("\"%v\"", et)
 				fmt.Print(",")
 				fmt.Printf("\"%v\"", strings.Split(*o.ResultConfiguration.OutputLocation, "/")[2])
 				fmt.Print(",")
-				fmt.Printf("\"%v\"", humanize.Bytes(uint64(*o.Statistics.DataScannedInBytes)))
+				sb := int64(-1)
+				if o.Statistics.DataScannedInBytes != nil {
+					sb = *o.Statistics.DataScannedInBytes
+				}
+				fmt.Printf("\"%v\"", humanize.Bytes(uint64(sb)))
 				fmt.Print(",")
-				fmt.Printf("\"%v\"", *o.Statistics.DataScannedInBytes)
+				fmt.Printf("\"%v\"", sb)
 				fmt.Print(",")
 				formatedQuery := strings.ReplaceAll(*o.Query, "\"", "'")
 				formatedQuery = strings.ReplaceAll(formatedQuery, "\n", " ")
@@ -151,6 +159,7 @@ func athenaQuery(a *athena.Athena, db string, query string, bucketResult string)
 		}
 
 		time.Sleep(duration)
+		fmt.Printf("## %v\n", *qrop.QueryExecution.Status.State)
 		switch status := *qrop.QueryExecution.Status.State; status {
 		case "QUEUED":
 			continue
@@ -196,5 +205,3 @@ func queryIDs(rows []*athena.Row) []*string {
 
 	return ids
 }
-
-// TODO: в цикле бачами по 50 получать информацию о запросах по айдишникам и выводить в csv
