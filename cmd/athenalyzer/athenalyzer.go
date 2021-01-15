@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -9,7 +10,9 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/athena"
 	"github.com/dustin/go-humanize"
+	"github.com/sirupsen/logrus"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -41,40 +44,75 @@ func main() {
 	argFromTime := flag.String("from-time", "", "from time (format: 0000-00-00T00:00:00Z)")
 	argToTime := flag.String("to-time", "", "from time (format: 0000-00-00T00:00:00Z)")
 	argAWSRegion := flag.String("aws-region", awsRegion, "set AWS Athena region")
+	argOutputFile := flag.String("output-file", "", "set output file")
+	argDebug := flag.Bool("debug", false, "turn on debug logging")
+	argBiggerThen := flag.Int64("bigger-then", 1099511627776, "queries bigger then")
+	argShowBigOnly := flag.Bool("big-only", false, "show big queries only")
 	flag.Parse()
+
+	logLevel := logrus.InfoLevel
+	if *argDebug {
+		logLevel = logrus.DebugLevel
+	}
+	logger := NewLogger(logLevel)
+
+	if *argFromTime == "" || *argToTime == "" {
+		logger.Errorf("from-time and to-time should not be empty")
+		flag.Usage()
+		os.Exit(31)
+
+	}
+	if *argOutputFile == "" {
+		fileName := fmt.Sprintf("athenalyzer-result_%v-%v.csv", *argFromTime, *argToTime)
+		fileName = strings.ReplaceAll(fileName, ":", "")
+		argOutputFile = &fileName
+	}
 
 	if *argVersion {
 		fmt.Println("Athenalyzer " + version)
 		os.Exit(0)
 	}
 
+	stat := Stat{
+		FromTime:   *argFromTime,
+		ToTime:     *argToTime,
+		ResultName: *argOutputFile,
+		BiggerThen: *argBiggerThen,
+	}
+	logger.Debug(*argShowBigOnly)
+	logger.Debug(stat.String())
+
+	file, err := os.Create(*argOutputFile)
+	defer file.Close()
+	if err != nil {
+		logger.Errorf("Can't create file %v", *argOutputFile)
+		os.Exit(10)
+	}
+
+	writer := csv.NewWriter(file)
+	defer writer.Flush()
+
 	athenaClient := athenaClient(argAWSRegion)
 	query := fmt.Sprintf(awsAthenaIDsQuery, *argFromTime, *argToTime)
 	//query := awsAthenaIDsQuery
-	athenaRows, err := athenaQuery(athenaClient, awsAthenaDBName, query, awsAthenaResultBucket)
+	athenaRows, err := athenaQuery(athenaClient, awsAthenaDBName, query, awsAthenaResultBucket, logger)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
 
 	ids := queryIDs(athenaRows)
-	//fmt.Printf(" ###len(ids) = %v\n", len(ids))
-	fmt.Print("queryExecutionID")
-	fmt.Print(",")
-	fmt.Print("Database")
-	fmt.Print(",")
-	fmt.Print("SubmissionDateTime")
-	fmt.Print(",")
-	fmt.Print("EngineExecutionTimeInMillis")
-	fmt.Print(",")
-	fmt.Print("OutputLocation (bucket)")
-	fmt.Print(",")
-	fmt.Print("Scanned(humanized)")
-	fmt.Print(",")
-	fmt.Print("DataScannedInBytes")
-	fmt.Print(",")
-	fmt.Print("Query")
-	fmt.Println("")
+	logger.Debugf("len of query ids: %v\n", len(ids))
+	writer.Write([]string{
+		"queryExecutionID",
+		"Database",
+		"SubmissionDateTime",
+		"EngineExecutionTimeInMillis",
+		"OutputLocation (bucket)",
+		"Scanned(humanized)",
+		"DataScannedInBytes",
+		"Query",
+	})
 
 	var batch []*string
 	for i, id := range ids {
@@ -82,44 +120,58 @@ func main() {
 		if (i%awsAthenaBatchSize == 0 && i != 0) || i == len(ids)-1 {
 			qei := athena.BatchGetQueryExecutionInput{QueryExecutionIds: batch}
 			output, err := athenaClient.BatchGetQueryExecution(&qei)
-			//			fmt.Printf("### len(batch)=%v len(output)=%v\n", len(batch), len(output.QueryExecutions))
+			logger.Debugf("len(batch)=%v len(output)=%v\n", len(batch), len(output.QueryExecutions))
 			if err != nil {
-				fmt.Println(err)
+				logger.Error(err)
 				os.Exit(2)
 			}
 
 			for _, o := range output.QueryExecutions {
-				fmt.Printf("\"%v\"", *o.QueryExecutionId)
-				fmt.Print(",")
-				fmt.Printf("\"%v\"", *o.QueryExecutionContext.Database)
-				fmt.Print(",")
-				fmt.Printf("\"%v\"", *o.Status.SubmissionDateTime)
-				fmt.Print(",")
+				stat.QueriesCount += 1
+				stat.TotalDataBytes += *o.Statistics.DataScannedInBytes
+				if *o.Statistics.DataScannedInBytes > stat.BiggerThen {
+					stat.BigQueriesCount += 1
+				}
+				if *o.Statistics.DataScannedInBytes > stat.BiggestQueryBytes {
+					stat.BiggestQueryBytes = *o.Statistics.DataScannedInBytes
+				}
+				row := []string{
+					*o.QueryExecutionId,
+					*o.QueryExecutionContext.Database,
+					o.Status.SubmissionDateTime.String(),
+				}
+
 				et := int64(-1)
 				if o.Statistics.EngineExecutionTimeInMillis != nil {
 					et = *o.Statistics.EngineExecutionTimeInMillis
 				}
-				fmt.Printf("\"%v\"", et)
-				fmt.Print(",")
-				fmt.Printf("\"%v\"", strings.Split(*o.ResultConfiguration.OutputLocation, "/")[2])
-				fmt.Print(",")
+				row = append(row, strconv.FormatInt(et, 10))
+				row = append(row, strings.Split(*o.ResultConfiguration.OutputLocation, "/")[2])
+
 				sb := int64(-1)
 				if o.Statistics.DataScannedInBytes != nil {
 					sb = *o.Statistics.DataScannedInBytes
 				}
-				fmt.Printf("\"%v\"", humanize.Bytes(uint64(sb)))
-				fmt.Print(",")
-				fmt.Printf("\"%v\"", sb)
-				fmt.Print(",")
+				row = append(row, humanize.Bytes(uint64(sb)))
+				row = append(row, strconv.FormatInt(sb, 10))
+
 				formatedQuery := strings.ReplaceAll(*o.Query, "\"", "'")
 				formatedQuery = strings.ReplaceAll(formatedQuery, "\n", " ")
 				formatedQuery = strings.ReplaceAll(formatedQuery, "\t", " ")
-				fmt.Printf("\"%v\"", formatedQuery)
-				fmt.Println("")
+				row = append(row, formatedQuery)
+				
+				if *o.Statistics.DataScannedInBytes > stat.BiggestQueryBytes || ! *argShowBigOnly {
+					err = writer.Write(row)
+					if err != nil {
+						logger.Errorf("Can't write file %v", err)
+					}
+				}
 			}
 			batch = nil
 		}
 	}
+
+	fmt.Print(stat.String())
 }
 
 func athenaClient(awsRegion *string) *athena.Athena {
@@ -129,7 +181,7 @@ func athenaClient(awsRegion *string) *athena.Athena {
 	return athena.New(awsSession)
 }
 
-func athenaQuery(a *athena.Athena, db string, query string, bucketResult string) ([]*athena.Row, error) {
+func athenaQuery(a *athena.Athena, db string, query string, bucketResult string, logger *logrus.Logger) ([]*athena.Row, error) {
 	var s athena.StartQueryExecutionInput
 	s.SetQueryString(query)
 
@@ -159,7 +211,7 @@ func athenaQuery(a *athena.Athena, db string, query string, bucketResult string)
 		}
 
 		time.Sleep(duration)
-		fmt.Printf("## %v\n", *qrop.QueryExecution.Status.State)
+		logger.Debugf("athena query status: %v", *qrop.QueryExecution.Status.State)
 		switch status := *qrop.QueryExecution.Status.State; status {
 		case "QUEUED":
 			continue
@@ -204,4 +256,36 @@ func queryIDs(rows []*athena.Row) []*string {
 	}
 
 	return ids
+}
+
+func NewLogger(level logrus.Level) *logrus.Logger {
+	logger := logrus.New()
+	logger.SetFormatter(&logrus.TextFormatter{DisableColors: false, FullTimestamp: true})
+	logger.SetLevel(level)
+	return logger
+}
+
+type Stat struct {
+	FromTime          string
+	ToTime            string
+	TotalDataBytes    int64
+	QueriesCount      int64
+	BigQueriesCount   int64
+	BiggerThen        int64
+	ResultName        string
+	BiggestQueryBytes int64
+}
+
+func (s *Stat) String() string {
+	return fmt.Sprintf(
+		"Period: %v - %v\nTotal data: %v\nCount of queries: %v\nCount of big queries (>%v): %v\nBiggest query: %v\nFile name: %v\n",
+		s.FromTime,
+		s.ToTime,
+		humanize.Bytes(uint64(s.TotalDataBytes)),
+		s.QueriesCount,
+		humanize.Bytes(uint64(s.BiggerThen)),
+		s.BigQueriesCount,
+		humanize.Bytes(uint64(s.BiggestQueryBytes)),
+		s.ResultName,
+	)
 }
