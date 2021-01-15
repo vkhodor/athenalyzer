@@ -159,7 +159,7 @@ func main() {
 				formatedQuery = strings.ReplaceAll(formatedQuery, "\n", " ")
 				formatedQuery = strings.ReplaceAll(formatedQuery, "\t", " ")
 				row = append(row, formatedQuery)
-				
+
 				if *o.Statistics.DataScannedInBytes > stat.BiggestQueryBytes || ! *argShowBigOnly {
 					err = writer.Write(row)
 					if err != nil {
