@@ -160,7 +160,12 @@ func main() {
 				formatedQuery = strings.ReplaceAll(formatedQuery, "\t", " ")
 				row = append(row, formatedQuery)
 
+				logger.Debugf("o.Statistics.DataScannedInBytes: %v", *o.Statistics.DataScannedInBytes)
+				logger.Debugf("stat.BiggestQueryBytes: %v", stat.BiggestQueryBytes)
+				logger.Debugf("argShowBigOnly: %v", *argShowBigOnly)
+
 				if *o.Statistics.DataScannedInBytes > stat.BiggestQueryBytes || !*argShowBigOnly {
+					logger.Debug("Write row")
 					err = writer.Write(row)
 					if err != nil {
 						logger.Errorf("Can't write file %v", err)
