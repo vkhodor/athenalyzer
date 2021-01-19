@@ -243,6 +243,7 @@ func athenaQuery(a *athena.Athena, db string, query string, bucketResult string,
 			return rows[1:], nil
 		}
 
+		logger.Debug(*qrop.QueryExecution.Status.StateChangeReason)
 		return []*athena.Row{}, errors.New("AWS returned:  unexpected status: " + *qrop.QueryExecution.Status.State)
 	}
 }
