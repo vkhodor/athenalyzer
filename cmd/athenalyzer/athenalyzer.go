@@ -128,6 +128,10 @@ func main() {
 
 			for _, o := range output.QueryExecutions {
 				stat.QueriesCount += 1
+				if o.Statistics.DataScannedInBytes == nil {
+					errorResult := int64(-1)
+					o.Statistics.DataScannedInBytes = &errorResult
+				}
 				stat.TotalDataBytes += *o.Statistics.DataScannedInBytes
 				if *o.Statistics.DataScannedInBytes > stat.BiggerThen {
 					stat.BigQueriesCount += 1
