@@ -108,6 +108,7 @@ func main() {
 		"Database",
 		"SubmissionDateTime",
 		"EngineExecutionTimeInMillis",
+		"FullS3Location",
 		"OutputLocation (bucket)",
 		"Scanned(humanized)",
 		"DataScannedInBytes",
@@ -150,6 +151,7 @@ func main() {
 					et = *o.Statistics.EngineExecutionTimeInMillis
 				}
 				row = append(row, strconv.FormatInt(et, 10))
+				row = append(row, *o.ResultConfiguration.OutputLocation)
 				row = append(row, strings.Split(*o.ResultConfiguration.OutputLocation, "/")[2])
 
 				sb := int64(-1)
