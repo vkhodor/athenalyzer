@@ -170,12 +170,20 @@ func main() {
 				logger.Debugf("stat.BiggestQueryBytes: %v", stat.BiggestQueryBytes)
 				logger.Debugf("argShowBigOnly: %v", *argShowBigOnly)
 
-				if *o.Statistics.DataScannedInBytes > stat.BiggestQueryBytes || !*argShowBigOnly {
-					logger.Debug("Write row")
-					err = writer.Write(row)
-					if err != nil {
-						logger.Errorf("Can't write file %v", err)
+				if *argShowBigOnly {
+					if *o.Statistics.DataScannedInBytes >= stat.BiggerThen {
+						logger.Debug("(big-only) Write row")
+						err = writer.Write(row)
+						if err != nil {
+							logger.Errorf("Can't write file %v", err)
+						}
 					}
+					continue
+				}
+				logger.Debug("(all) Write row")
+				err = writer.Write(row)
+				if err != nil {
+					logger.Errorf("Can't write file %v", err)
 				}
 			}
 			batch = nil
